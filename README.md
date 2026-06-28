@@ -127,5 +127,7 @@ flowchart TD
 
 ## 📜 License & Credits
 
-Developed with ❤️ by **ESP32-BC-250 Project**.
+This project is licensed under the **MIT License** (see the [LICENSE](LICENSE) file for details). You are free to use, modify, distribute, and **commercialize** this software, provided that the original copyright and attribution notices are preserved in all copies.
+
+Developed with ❤️ by **Rafael Bernardino & ESP32-BC-250 Project**.
 Based on reference architectures by [dexikdex](https://github.com/dexikdex/ESP32-BC250-LOP_PSU-PowerON-Xbox) and [PetteriLah](https://github.com/PetteriLah/BC-250-PC-Remote-Control).
