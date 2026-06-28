@@ -11,7 +11,7 @@ The system merges four independent control methods into a single **non-blocking*
 1. **🔘 Physical Button:** Hardware interrupt (ISR FALLING) with software debounce and cooldown protection (500ms).
 2. **🌐 Responsive Web UI:** Embedded asynchronous HTTP server (`ESPAsyncWebServer`) serving a sleek, Dark-Mode web panel with real-time AJAX/JSON status updates.
 3. **🗣️ Voice Control (Alexa):** Local smart home device emulation (`FauxmoESP`) fully compatible with Amazon Echo devices (e.g., *"Alexa, turn on BC-250"*).
-4. **🎮 Bluetooth Gamepads:** Native support for modern controllers (PS5 DualSense, PS4 DualShock, Xbox Wireless, 8BitDo, Nintendo Switch Pro) powered by the `Bluepad32` library (pressing PS/Home toggles PSU power).
+4. **🎮 Bluetooth Gamepads:** Native support for modern controllers (PS5 DualSense, PS4 DualShock, Xbox Wireless, 8BitDo, Nintendo Switch Pro) powered by the `Bluepad32` library, featuring custom MAC Address filtering stored in NVS/Preferences via Web Panel.
 
 ---
 

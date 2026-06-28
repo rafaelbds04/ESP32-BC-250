@@ -11,7 +11,7 @@ O projeto unifica quatro métodos independentes de controle em uma máquina de e
 1. **🔘 Botão Físico:** Interrupção via hardware (ISR FALLING) com trava de debounce/cooldown por software (500ms).
 2. **🌐 Interface Web Responsiva:** Servidor HTTP assíncrono embarcado (`ESPAsyncWebServer`) servindo um painel Dark Mode moderno com controle por toggle e atualização de status em tempo real (via AJAX/JSON).
 3. **🗣️ Comando de Voz (Alexa):** Emulação local de dispositivo smart home (`FauxmoESP`) compatível com caixas Amazon Echo (ex: *"Alexa, ligar BC-250"*).
-4. **🎮 Controles Bluetooth:** Suporte nativo a controles modernos (PS5 DualSense, PS4 DualShock, Xbox Wireless, 8BitDo, Nintendo Switch Pro) via biblioteca `Bluepad32` (botão PS/Home altera o estado da fonte).
+4. **🎮 Controles Bluetooth:** Suporte nativo a controles modernos (PS5 DualSense, PS4 DualShock, Xbox Wireless, 8BitDo, Nintendo Switch Pro) via biblioteca `Bluepad32`, com filtro personalizável por MAC Address gravado na NVS/Preferences via Painel Web.
 
 ---
 
