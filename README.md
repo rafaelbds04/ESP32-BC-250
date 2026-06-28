@@ -13,16 +13,72 @@ The system merges four independent control methods into a single **non-blocking*
 3. **🗣️ Voice Control (Alexa):** Local smart home device emulation (`FauxmoESP`) fully compatible with Amazon Echo devices (e.g., *"Alexa, turn on BC-250"*).
 4. **🎮 Bluetooth Gamepads:** Native support for modern controllers (PS5 DualSense, PS4 DualShock, Xbox Wireless, 8BitDo, Nintendo Switch Pro) powered by the `Bluepad32` library, featuring custom MAC Address filtering stored in NVS/Preferences via Web Panel.
 
+### 🖼️ Responsive Web Interface (Dark Mode)
+![ESP32-BC-250 Web Interface](docs/web_interface.png)
+
 ---
 
-## 🛠️ Hardware & Pinout (ESP32-WROOM-32D / 4MB)
+## 🔌 ATX Connection Diagram & Pinout
 
-| GPIO Pin | Mode | Hardware Circuit / Description | Initial State (Boot) |
+To power the ESP32 and control the ATX power supply, only **3 essential pins from the main 20/24-pin ATX connector** are used:
+- **+5VSB (5V Standby - Pin 9 / Purple):** Provides continuous 5V power even when the main PSU outputs are OFF. Powers the ESP32 via the `5V / VIN` pin.
+- **PS-ON (Power Supply On - Pin 16 / Green):** The main PSU activation pin. When grounded (pulled LOW), the power supply turns ON all main rails (+12V, +5V, +3.3V).
+- **GND (Ground - Pins 3, 5, 7, 15, 17, 18, 19, or 24 / Black):** Common ground shared between the PSU, ESP32, NPN transistor, and push-button.
+
+### 📊 Hardware Wiring Table
+
+| Component / ESP32 Pin | Mode | Circuit Wiring / 24-Pin ATX Connector | Initial State (Boot) |
 |---|---|---|---|
-| **GPIO 26** | `OUTPUT` | Connected to the Base of an NPN transistor (C1815GR or 2N2222A) via a 2.2kΩ resistor. Collector connects to PSU **PS-ON**, Emitter to GND. | `LOW` (PSU OFF) |
-| **GPIO 27** | `OUTPUT` | Status LED on the physical button. Reflects PSU state (HIGH = ON, LOW = OFF). | `LOW` (OFF) |
-| **GPIO 32** | `INPUT_PULLUP` | Physical Push-Button connected to GND. Triggers hardware interrupt on falling edge (`FALLING`). | Internal Pull-up |
-| **GPIO 34** | `INPUT` | Optional logic input (0 to 3.3V) for reading signals like **Power Good** (PG). Requires `#define USE_LOGIC_INPUT`. | ADC Read |
+| **5V / VIN Pin (ESP32)** | `POWER` | Connected directly to **Pin 9 (+5VSB / Purple)** on ATX connector | Always Powered |
+| **GND Pin (ESP32)** | `POWER` | Connected to **GND (Black)** on ATX connector | Common Ground |
+| **GPIO 26 (ESP32)** | `OUTPUT` | Connected to the **Base** of an NPN Transistor (C1815GR or 2N2222A) via a 2.2kΩ Resistor | `LOW` (PSU OFF) |
+| **Transistor Collector** | — | Connected to **Pin 16 (PS-ON / Green)** on ATX connector | — |
+| **Transistor Emitter** | — | Connected to **GND (Black)** on ATX connector | — |
+| **GPIO 27 (ESP32)** | `OUTPUT` | Connected to Anode of **Status LED** (via 220Ω resistor). Cathode to GND | `LOW` (OFF) |
+| **GPIO 32 (ESP32)** | `INPUT_PULLUP` | Connected to one terminal of the **Physical Push-Button**. Other terminal to GND | Internal Pull-up |
+| **GPIO 34 (ESP32)** | `INPUT` | Optional logic input (0 to 3.3V) for reading signals like **Power Good** (PG). Requires `#define USE_LOGIC_INPUT`. | ADC Read |
+
+### 🧬 Circuit Schematic (Mermaid Diagram)
+
+```mermaid
+flowchart TD
+    subgraph ATX_PSU ["20/24-Pin ATX Connector"]
+        VSB["Pin 9: +5VSB (Purple/5V Standby)"]
+        PSON["Pin 16: PS-ON (Green/Power On)"]
+        GND_ATX["Pin GND (Black/Ground)"]
+    end
+
+    subgraph ESP32_BOARD ["ESP32 Board"]
+        VIN["5V / VIN Pin"]
+        GND_ESP["GND Pin"]
+        GPIO26["GPIO 26 (PS-ON Control)"]
+        GPIO27["GPIO 27 (Status LED)"]
+        GPIO32["GPIO 32 (Physical Button)"]
+    end
+
+    subgraph CIRCUIT ["External Components"]
+        RES_BASE["2.2kΩ Resistor"]
+        NPN["NPN Transistor (C1815GR / 2N2222A)"]
+        BTN["Physical Push-Button"]
+        LED["Status LED (with 220Ω Resistor)"]
+    end
+
+    %% Power
+    VSB -->|"Continuous 5V"| VIN
+    GND_ATX === GND_ESP
+
+    %% PS-ON NPN Control
+    GPIO26 --> RES_BASE
+    RES_BASE -->|"Base"| NPN
+    PSON -->|"Collector"| NPN
+    NPN -->|"Emitter"| GND_ATX
+
+    %% I/O
+    GPIO32 --> BTN
+    BTN --> GND_ESP
+    GPIO27 --> LED
+    LED --> GND_ESP
+```
 
 ---
 
