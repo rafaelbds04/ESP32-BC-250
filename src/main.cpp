@@ -35,9 +35,9 @@
 // --- Módulos do projeto (ordem importa: config → psu → demais) ---
 #include "config.h"
 #include "psu_control.h"
-#include "web_server.h"
-#include "alexa_control.h"
 #include "gamepad_control.h"
+#include "alexa_control.h"
+#include "web_server.h"
 
 // =============================================================================
 // VARIÁVEIS DO HEARTBEAT (debug)

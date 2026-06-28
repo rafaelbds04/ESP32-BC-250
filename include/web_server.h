@@ -1,17 +1,16 @@
 /**
  * @file web_server.h
- * @brief Servidor Web assíncrono com interface dark-mode para controle da PSU
+ * @brief Servidor Web assíncrono com interface dark-mode para controle da PSU e Gamepad BT
  *
  * Usa ESPAsyncWebServer para servir uma interface HTML mobile-friendly.
  * A página é embarcada diretamente no código (sem SPIFFS) para simplicidade.
  *
  * ENDPOINTS:
- *   GET /        → Página HTML com botão toggle e status
- *   GET /toggle  → Alterna estado da PSU, retorna JSON {"state":"ON"/"OFF"}
- *   GET /status  → Retorna JSON com estado atual {"state":"ON"/"OFF"}
- *
- * A interface usa JavaScript fetch() para atualizar o status sem reload,
- * com polling a cada 2 segundos para manter a sincronização.
+ *   GET /               → Página HTML principal
+ *   GET /toggle         → Alterna estado da PSU, retorna JSON {"state":"ON"/"OFF"}
+ *   GET /status         → Retorna JSON com estado atual {"state":"ON"/"OFF"}
+ *   GET /gamepad/status → Retorna JSON com MAC alvo e controles conectados
+ *   GET /gamepad/save   → Salva novo MAC alvo na memória NVS / Preferences
  */
 
 #ifndef WEB_SERVER_H
@@ -21,6 +20,7 @@
 #include <fauxmoESP.h>
 #include "config.h"
 #include "psu_control.h"
+#include "gamepad_control.h"
 
 extern fauxmoESP fauxmo;
 
@@ -31,16 +31,6 @@ AsyncWebServer server(WEB_SERVER_PORT);
 // HTML DA INTERFACE WEB (embarcado como string literal)
 // =============================================================================
 
-/**
- * Interface dark-mode, mobile-friendly, com botão toggle animado.
- *
- * Design:
- * - Fundo gradiente escuro (#0a0a1a → #1a1a2e)
- * - Botão toggle com transição CSS (verde ON, vermelho OFF)
- * - Card com glassmorphism sutil
- * - Polling JavaScript a cada 2s para manter status sincronizado
- * - Responsivo via viewport meta tag
- */
 const char HTML_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -62,6 +52,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             align-items: center;
             justify-content: center;
             padding: 20px;
+            gap: 20px;
             -webkit-tap-highlight-color: transparent;
         }
 
@@ -72,7 +63,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             -webkit-backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 24px;
-            padding: 40px 32px;
+            padding: 32px 28px;
             width: 100%;
             max-width: 380px;
             text-align: center;
@@ -80,29 +71,13 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         }
 
         /* === HEADER === */
-        .logo {
-            font-size: 2.2em;
-            margin-bottom: 4px;
-        }
-
-        h1 {
-            font-size: 1.4em;
-            font-weight: 600;
-            color: #ffffff;
-            margin-bottom: 4px;
-        }
-
-        .subtitle {
-            font-size: 0.85em;
-            color: #888;
-            margin-bottom: 32px;
-        }
+        .logo { font-size: 2.2em; margin-bottom: 4px; }
+        h1 { font-size: 1.4em; font-weight: 600; color: #ffffff; margin-bottom: 4px; }
+        h2 { font-size: 1.15em; font-weight: 600; color: #ffffff; margin-bottom: 12px; }
+        .subtitle { font-size: 0.85em; color: #888; margin-bottom: 24px; }
 
         /* === STATUS INDICATOR === */
-        .status-container {
-            margin-bottom: 32px;
-        }
-
+        .status-container { margin-bottom: 24px; }
         .status-dot {
             display: inline-block;
             width: 12px;
@@ -112,23 +87,9 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             vertical-align: middle;
             transition: all 0.4s ease;
         }
-
-        .status-dot.on {
-            background: #00e676;
-            box-shadow: 0 0 12px rgba(0, 230, 118, 0.6);
-        }
-
-        .status-dot.off {
-            background: #ff5252;
-            box-shadow: 0 0 12px rgba(255, 82, 82, 0.4);
-        }
-
-        .status-text {
-            font-size: 1.1em;
-            font-weight: 500;
-            vertical-align: middle;
-            transition: color 0.3s ease;
-        }
+        .status-dot.on { background: #00e676; box-shadow: 0 0 12px rgba(0, 230, 118, 0.6); }
+        .status-dot.off { background: #ff5252; box-shadow: 0 0 12px rgba(255, 82, 82, 0.4); }
+        .status-text { font-size: 1.1em; font-weight: 500; vertical-align: middle; }
 
         /* === TOGGLE BUTTON === */
         .toggle-btn {
@@ -136,12 +97,10 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             display: inline-block;
             width: 120px;
             height: 60px;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
             cursor: pointer;
         }
-
         .toggle-btn input { display: none; }
-
         .toggle-slider {
             position: absolute;
             inset: 0;
@@ -150,7 +109,6 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             border: 2px solid rgba(255, 255, 255, 0.1);
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
-
         .toggle-slider::before {
             content: '';
             position: absolute;
@@ -163,12 +121,10 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
-
         input:checked + .toggle-slider {
             border-color: rgba(0, 230, 118, 0.3);
             box-shadow: 0 0 20px rgba(0, 230, 118, 0.15);
         }
-
         input:checked + .toggle-slider::before {
             transform: translateX(60px);
             background: linear-gradient(135deg, #00e676, #00c853);
@@ -176,31 +132,57 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         }
 
         /* === POWER ICON === */
-        .power-icon {
-            font-size: 2.4em;
-            margin-bottom: 16px;
-            transition: all 0.3s ease;
-        }
-
+        .power-icon { font-size: 2.4em; margin-bottom: 12px; transition: all 0.3s ease; }
         .power-icon.on { color: #00e676; text-shadow: 0 0 20px rgba(0, 230, 118, 0.5); }
         .power-icon.off { color: #ff5252; text-shadow: 0 0 20px rgba(255, 82, 82, 0.3); }
 
         /* === INFO FOOTER === */
-        .info {
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.78em;
-            color: #666;
-            margin-bottom: 4px;
-        }
-
+        .info { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+        .info-row { display: flex; justify-content: space-between; font-size: 0.78em; color: #666; margin-bottom: 4px; }
         .info-row span:last-child { color: #999; }
+
+        /* === FORM INPUT & BUTTONS === */
+        .input-group { text-align: left; margin-bottom: 14px; }
+        .input-label { display: block; font-size: 0.8em; color: #aaa; margin-bottom: 6px; }
+        .text-input {
+            width: 100%;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 0.95em;
+            outline: none;
+            transition: border 0.3s ease;
+        }
+        .text-input:focus { border-color: #00e676; }
+
+        .btn-group { display: flex; gap: 8px; margin-bottom: 12px; }
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.82em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-primary { background: linear-gradient(135deg, #00c853, #009624); }
+        .btn-secondary { background: linear-gradient(135deg, #424242, #212121); border: 1px solid rgba(255, 255, 255, 0.1); color: #ccc; }
+        .btn:active { transform: scale(0.98); }
+
+        .gamepad-box {
+            background: rgba(0,0,0,0.25);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 16px;
+            text-align: left;
+            font-size: 0.85em;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
 
         /* === TOAST NOTIFICATION === */
         .toast {
@@ -218,45 +200,30 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             z-index: 1000;
             backdrop-filter: blur(10px);
         }
-
-        .toast.show {
-            transform: translateX(-50%) translateY(0);
-            opacity: 1;
-        }
-
-        /* === LOADING SPINNER === */
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
         .loading { pointer-events: none; opacity: 0.6; }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .pulse { animation: pulse 1.5s ease-in-out infinite; }
     </style>
 </head>
 <body>
+
+    <!-- CARD 1: CONTROLE DA FONTE -->
     <div class="card" id="mainCard">
         <div class="logo">⚡</div>
         <h1>BC-250 Controller</h1>
         <p class="subtitle">ESP32 Smart PSU Control</p>
 
-        <!-- Power Icon -->
         <div class="power-icon off" id="powerIcon">⏻</div>
 
-        <!-- Toggle Switch -->
         <label class="toggle-btn" id="toggleBtn">
             <input type="checkbox" id="toggleSwitch">
             <span class="toggle-slider"></span>
         </label>
 
-        <!-- Status Indicator -->
         <div class="status-container">
             <span class="status-dot off" id="statusDot"></span>
             <span class="status-text" id="statusText">DESLIGADA</span>
         </div>
 
-        <!-- Info Footer -->
         <div class="info">
             <div class="info-row">
                 <span>Firmware</span>
@@ -273,10 +240,33 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         </div>
     </div>
 
+    <!-- CARD 2: CONFIGURAÇÃO DO GAMEPAD (PS5 / 8BitDo / Xbox) -->
+    <div class="card">
+        <div class="logo">🎮</div>
+        <h2>Controle Bluetooth</h2>
+        <p class="subtitle" style="margin-bottom:16px;">Filtro de Wake-Up por MAC</p>
+
+        <div class="gamepad-box">
+            <div style="color: #888; margin-bottom: 6px; font-size: 0.9em;">Controle Conectado:</div>
+            <div id="gamepadList" style="color: #00e676; font-weight: 500;">Nenhum conectado</div>
+        </div>
+
+        <div class="input-group">
+            <label class="input-label">MAC Alvo do Controle (Wake Function):</label>
+            <input type="text" id="macInput" class="text-input" placeholder="Ex: AA:BB:CC:DD:EE:FF" maxlength="17">
+        </div>
+
+        <div class="btn-group">
+            <button id="btnSaveMac" class="btn btn-primary">Salvar MAC</button>
+            <button id="btnClearMac" class="btn btn-secondary">Permitir Todos</button>
+        </div>
+
+        <div id="macStatusBadge" style="font-size: 0.78em; margin-top: 8px; min-height: 20px;">Filtro: Carregando...</div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
-        // === ELEMENTOS DO DOM ===
         const toggleSwitch = document.getElementById('toggleSwitch');
         const toggleBtn = document.getElementById('toggleBtn');
         const statusDot = document.getElementById('statusDot');
@@ -289,7 +279,6 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
         let isRequesting = false;
 
-        // === ATUALIZA UI COM BASE NO ESTADO ===
         function updateUI(state) {
             const isOn = state === 'ON';
             toggleSwitch.checked = isOn;
@@ -298,7 +287,6 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             powerIcon.className = 'power-icon ' + (isOn ? 'on' : 'off');
         }
 
-        // === TOGGLE VIA FETCH (SEM RELOAD) ===
         toggleBtn.addEventListener('click', async function(e) {
             e.preventDefault();
             if (isRequesting) return;
@@ -318,7 +306,6 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             }
         });
 
-        // === POLLING DE STATUS (A CADA 2s) ===
         async function pollStatus() {
             try {
                 const res = await fetch('/status');
@@ -326,15 +313,70 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 updateUI(data.state);
                 if (data.uptime) uptimeEl.textContent = data.uptime;
                 if (data.ip) ipEl.textContent = data.ip;
-            } catch (err) {
-                // Silencioso — reconecta no próximo poll
-            }
+            } catch (err) {}
         }
 
-        setInterval(pollStatus, 2000);
-        pollStatus(); // Primeira chamada imediata
+        async function pollGamepadStatus() {
+            try {
+                const res = await fetch('/gamepad/status');
+                const data = await res.json();
 
-        // === TOAST NOTIFICATION ===
+                const listEl = document.getElementById('gamepadList');
+                if (data.controllers && data.controllers.length > 0) {
+                    let html = '';
+                    data.controllers.forEach(c => {
+                        html += `<div><strong>${c.model}</strong><br><span style="font-family:monospace; color:#aaa; font-size:0.9em;">${c.mac}</span> <a href="#" onclick="useMac('${c.mac}'); return false;" style="color:#00e676; font-weight:bold; font-size:0.85em; margin-left:6px; text-decoration:none;">[Usar MAC]</a></div>`;
+                    });
+                    listEl.innerHTML = html;
+                } else {
+                    listEl.innerHTML = '<span style="color:#888;">Nenhum controle conectado</span>';
+                }
+
+                const badge = document.getElementById('macStatusBadge');
+                if (data.target_mac && data.target_mac.length > 0) {
+                    badge.innerHTML = `<span style="color:#00e676;">🔒 Filtro Ativo: <strong>${data.target_mac}</strong></span>`;
+                    if (document.activeElement.id !== 'macInput') {
+                        document.getElementById('macInput').value = data.target_mac;
+                    }
+                } else {
+                    badge.innerHTML = `<span style="color:#ffb74d;">🔓 Filtro Desativado (Qualquer controle)</span>`;
+                    if (document.activeElement.id !== 'macInput') {
+                        document.getElementById('macInput').value = '';
+                    }
+                }
+            } catch(e) {}
+        }
+
+        function useMac(mac) {
+            document.getElementById('macInput').value = mac;
+            showToast('MAC preenchido! Clique em Salvar.');
+        }
+
+        document.getElementById('btnSaveMac').addEventListener('click', async () => {
+            const mac = document.getElementById('macInput').value.trim();
+            try {
+                const res = await fetch('/gamepad/save?mac=' + encodeURIComponent(mac));
+                const data = await res.json();
+                showToast(data.target_mac ? 'MAC alvo salvo ✅' : 'Filtro desativado 🔓');
+                pollGamepadStatus();
+            } catch(e) { showToast('Erro ao salvar MAC ⚠️'); }
+        });
+
+        document.getElementById('btnClearMac').addEventListener('click', async () => {
+            try {
+                const res = await fetch('/gamepad/save?mac=clear');
+                const data = await res.json();
+                document.getElementById('macInput').value = '';
+                showToast('Filtro removido (Permitir Todos) 🔓');
+                pollGamepadStatus();
+            } catch(e) { showToast('Erro ao limpar MAC ⚠️'); }
+        });
+
+        setInterval(pollStatus, 2000);
+        setInterval(pollGamepadStatus, 3000);
+        pollStatus();
+        pollGamepadStatus();
+
         function showToast(msg) {
             toast.textContent = msg;
             toast.classList.add('show');
@@ -349,9 +391,6 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 // FUNÇÕES DE UTILIDADE
 // =============================================================================
 
-/**
- * @brief Formata o uptime em string legível (Xd Xh Xm Xs)
- */
 String formatUptime() {
     unsigned long totalSec = millis() / 1000;
     unsigned long days = totalSec / 86400;
@@ -370,12 +409,6 @@ String formatUptime() {
 // INICIALIZAÇÃO DO SERVIDOR WEB
 // =============================================================================
 
-/**
- * @brief Configura e inicia o ESPAsyncWebServer
- *
- * Registra os endpoints e inicia o servidor na porta configurada.
- * DEVE ser chamado após o WiFi estar conectado.
- */
 void initWebServer() {
     // --- Página principal (GET /) ---
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -400,6 +433,40 @@ void initWebServer() {
         json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
         json += "\"heap\":" + String(ESP.getFreeHeap());
         json += "}";
+        request->send(200, "application/json", json);
+    });
+
+    // --- Gamepad Status (GET /gamepad/status) ---
+    server.on("/gamepad/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String json = "{";
+        json += "\"target_mac\":\"" + targetGamepadMac + "\",";
+        json += "\"controllers\":[";
+
+        int count = 0;
+        for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+            ControllerPtr ctl = myControllers[i];
+            if (ctl != nullptr && ctl->isConnected()) {
+                if (count > 0) json += ",";
+                json += "{";
+                json += "\"index\":" + String(i) + ",";
+                json += "\"model\":\"" + ctl->getModelName() + "\",";
+                json += "\"mac\":\"" + getControllerMacAddress(ctl) + "\"";
+                json += "}";
+                count++;
+            }
+        }
+        json += "]}";
+        request->send(200, "application/json", json);
+    });
+
+    // --- Gamepad Save MAC (GET /gamepad/save?mac=...) ---
+    server.on("/gamepad/save", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String mac = "";
+        if (request->hasParam("mac")) {
+            mac = request->getParam("mac")->value();
+        }
+        saveTargetMac(mac);
+        String json = "{\"status\":\"ok\",\"target_mac\":\"" + targetGamepadMac + "\"}";
         request->send(200, "application/json", json);
     });
 

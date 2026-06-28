@@ -1,6 +1,6 @@
 /**
  * @file gamepad_control.h
- * @brief Integração Bluetooth com gamepads via Bluepad32
+ * @brief Integração Bluetooth com gamepads via Bluepad32 + Filtro por MAC Address
  *
  * Suporta uma ampla gama de controles Bluetooth, incluindo:
  *   - Sony DualSense (PS5) e DualShock 4 (PS4)
@@ -9,33 +9,30 @@
  *   - 8BitDo Ultimate, SN30 Pro+, etc.
  *   - Gamepads genéricos HID
  *
- * LÓGICA:
- *   - Quando o botão Home/PS/Guide é pressionado, executa togglePSU()
- *   - Cooldown de GAMEPAD_COOLDOWN_MS (500ms) evita toggles repetidos
- *   - Suporta até BP32_MAX_GAMEPADS controles simultâneos
- *
- * NOTA TÉCNICA:
- *   Bluepad32 usa BTstack ao invés do Bluedroid padrão. Isso requer
- *   o framework Arduino customizado configurado no platformio.ini.
- *   A coexistência WiFi + BT funciona via time-division multiplexing
- *   no rádio 2.4GHz compartilhado do ESP32.
- *
- * API Bluepad32 v3.7+:
- *   - ControllerPtr (typedef para Controller*) — tipo correto do ponteiro
- *   - BP32_MAX_CONTROLLERS — número máximo de controles simultâneos
- *   - miscSystem() — helper que testa MISC_BUTTON_SYSTEM (Home/PS/Guide)
+ * RECURSO DE FILTRO POR MAC:
+ *   Permite configurar um MAC de controle específico (ex: PS5 DualSense ou 8BitDo).
+ *   Quando configurado, apenas o controle com aquele MAC responderá ao botão Home/PS.
+ *   Se não houver MAC configurado (vazio), qualquer controle conectado pode acionar a fonte.
+ *   As configurações são salvas de forma persistente na memória NVS (Preferences).
  */
 
 #ifndef GAMEPAD_CONTROL_H
 #define GAMEPAD_CONTROL_H
 
 #include <Bluepad32.h>
+#include <Preferences.h>
 #include "config.h"
 #include "psu_control.h"
 
 // =============================================================================
-// ESTADO DO GAMEPAD
+// ESTADO DO GAMEPAD & ARMAZENAMENTO PERSISTENTE
 // =============================================================================
+
+/** Instância do NVS / Preferences */
+Preferences preferences;
+
+/** MAC Address do controle permitido (ex: "AA:BB:CC:DD:EE:FF" ou "" para todos) */
+String targetGamepadMac = "";
 
 /** Array de ponteiros para controles conectados (ControllerPtr = Controller*) */
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
@@ -47,14 +44,65 @@ unsigned long lastGamepadToggle = 0;
 bool gamepadFirstPress = true;
 
 // =============================================================================
+// FUNÇÕES AUXILIARES DE MAC & CONFIGURAÇÃO
+// =============================================================================
+
+/**
+ * @brief Obtém o MAC Address formatado em String (AA:BB:CC:DD:EE:FF) de um controle
+ */
+String getControllerMacAddress(ControllerPtr ctl) {
+    if (ctl == nullptr) return "";
+    ControllerProperties props = ctl->getProperties();
+    char buf[18];
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+             props.btaddr[0], props.btaddr[1], props.btaddr[2],
+             props.btaddr[3], props.btaddr[4], props.btaddr[5]);
+    return String(buf);
+}
+
+/**
+ * @brief Carrega as configurações do gamepad gravadas na NVS
+ */
+void loadGamepadConfig() {
+    preferences.begin("bc250", true); // Modo leitura
+    targetGamepadMac = preferences.getString("target_mac", "");
+    preferences.end();
+    targetGamepadMac.toUpperCase();
+    targetGamepadMac.trim();
+    if (targetGamepadMac.length() > 0) {
+        Serial.printf("[GAMEPAD] Filtro de MAC ativo: '%s'\n", targetGamepadMac.c_str());
+    } else {
+        Serial.println("[GAMEPAD] Filtro de MAC desativado (qualquer controle pode acionar)");
+    }
+}
+
+/**
+ * @brief Salva o MAC Address alvo na memória NVS
+ * @param mac String com o MAC ou "clear"/"all" para remover o filtro
+ */
+bool saveTargetMac(String mac) {
+    mac.toUpperCase();
+    mac.trim();
+    if (mac == "CLEAR" || mac == "NONE" || mac == "ALL" || mac == "TODOS") {
+        mac = "";
+    }
+
+    preferences.begin("bc250", false); // Modo escrita
+    preferences.putString("target_mac", mac);
+    preferences.end();
+
+    targetGamepadMac = mac;
+    Serial.printf("[GAMEPAD] Novo MAC salvo na NVS: '%s'\n",
+                  targetGamepadMac.length() > 0 ? targetGamepadMac.c_str() : "TODOS (Sem Filtro)");
+    return true;
+}
+
+// =============================================================================
 // CALLBACKS DO BLUEPAD32
 // =============================================================================
 
 /**
  * @brief Callback chamado quando um controle BT é conectado
- *
- * Armazena o ponteiro do controle no array e loga informações.
- * Bluepad32 gerencia a conexão BT automaticamente.
  */
 void onConnectedController(ControllerPtr ctl) {
     bool foundSlot = false;
@@ -62,9 +110,10 @@ void onConnectedController(ControllerPtr ctl) {
         if (myControllers[i] == nullptr) {
             myControllers[i] = ctl;
             foundSlot = true;
+            String mac = getControllerMacAddress(ctl);
             Serial.printf("[GAMEPAD] Conectado no slot %d\n", i);
             Serial.printf("[GAMEPAD]   Modelo: %s\n", ctl->getModelName().c_str());
-            Serial.printf("[GAMEPAD]   Type:   %d\n", ctl->getModel());
+            Serial.printf("[GAMEPAD]   MAC:    %s\n", mac.c_str());
             ControllerProperties props = ctl->getProperties();
             Serial.printf("[GAMEPAD]   VID: 0x%04x, PID: 0x%04x\n",
                           props.vendor_id, props.product_id);
@@ -78,8 +127,6 @@ void onConnectedController(ControllerPtr ctl) {
 
 /**
  * @brief Callback chamado quando um controle BT é desconectado
- *
- * Limpa o slot do controle no array.
  */
 void onDisconnectedController(ControllerPtr ctl) {
     for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
@@ -96,16 +143,12 @@ void onDisconnectedController(ControllerPtr ctl) {
 // =============================================================================
 
 /**
- * @brief Inicializa o Bluepad32
- *
- * Configura os callbacks de conexão/desconexão e inicializa
- * o array de controles. O Bluepad32 começa a procurar dispositivos
- * BT automaticamente após BP32.setup().
- *
- * NOTA: Esta função DEVE ser chamada após WiFi estar conectado,
- * pois a coexistência WiFi+BT precisa que o WiFi esteja estável.
+ * @brief Inicializa o Bluepad32 e carrega configurações
  */
 void initGamepad() {
+    // Carregar configurações de MAC salvas na NVS
+    loadGamepadConfig();
+
     // Inicializar array
     for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
         myControllers[i] = nullptr;
@@ -118,8 +161,6 @@ void initGamepad() {
     BP32.enableNewBluetoothConnections(true);
 
     // Permitir reconexão automática de dispositivos já pareados
-    // true = esquece conexões anteriores (forçar novo pairing)
-    // Comente a linha abaixo se quiser manter os dispositivos pareados
     BP32.forgetBluetoothKeys();
 
     Serial.println("[GAMEPAD] Bluepad32 inicializado — aguardando conexões BT...");
@@ -132,16 +173,6 @@ void initGamepad() {
 
 /**
  * @brief Processa input dos controles conectados (chamado no loop)
- *
- * Para cada controle conectado e com dados disponíveis:
- * 1. Verifica se o botão Home/PS/Guide está pressionado via miscSystem()
- * 2. Se sim, e se o cooldown já passou, executa togglePSU()
- *
- * MAPEAMENTO DO BOTÃO HOME (miscSystem):
- *   Bluepad32 mapeia o botão Home/PS/Guide como MISC_BUTTON_SYSTEM.
- *   O helper miscSystem() testa esse bit automaticamente.
- *
- *   Referência: https://bluepad32.readthedocs.io/en/latest/
  */
 void handleGamepad() {
     // Atualiza estado interno do Bluepad32 (non-blocking)
@@ -161,17 +192,24 @@ void handleGamepad() {
         }
 
         // Verificar botão Home/PS/Guide via helper miscSystem()
-        // miscSystem() testa internamente: miscButtons() & MISC_BUTTON_SYSTEM
         bool homePressed = ctl->miscSystem();
 
         if (homePressed && (now - lastGamepadToggle >= GAMEPAD_COOLDOWN_MS)) {
             lastGamepadToggle = now;
 
-            // Log detalhado na primeira vez (ajuda debug)
+            String ctlMac = getControllerMacAddress(ctl);
+
+            // Se houver um MAC específico configurado, ignora outros controles
+            if (targetGamepadMac.length() > 0 && !ctlMac.equalsIgnoreCase(targetGamepadMac)) {
+                Serial.printf("[GAMEPAD] Ignorado press do MAC %s (filtro ativo: %s)\n",
+                              ctlMac.c_str(), targetGamepadMac.c_str());
+                continue;
+            }
+
             if (gamepadFirstPress) {
                 gamepadFirstPress = false;
-                Serial.printf("[GAMEPAD] Primeiro press! miscButtons=0x%04x, model=%s\n",
-                              ctl->miscButtons(), ctl->getModelName().c_str());
+                Serial.printf("[GAMEPAD] Press aceito do MAC %s (%s)\n",
+                              ctlMac.c_str(), ctl->getModelName().c_str());
             }
 
             togglePSU("Gamepad BT");
