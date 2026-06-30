@@ -272,6 +272,28 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         <div id="macStatusBadge" style="font-size: 0.78em; margin-top: 8px; min-height: 20px;">Filtro: Carregando...</div>
     </div>
 
+    <!-- CARD 3: ALEXA & UTILITÁRIOS -->
+    <div class="card">
+        <div class="logo">🏠</div>
+        <h2>Alexa & Utilitários</h2>
+        <p class="subtitle" style="margin-bottom:16px;">Configurações do Dispositivo</p>
+
+        <div class="input-group">
+            <label class="input-label">Nome do Dispositivo na Alexa:</label>
+            <input type="text" id="alexaNameInput" class="text-input" placeholder="Ex: BC, Fonte" maxlength="20">
+        </div>
+
+        <div class="btn-group">
+            <button id="btnSaveAlexa" class="btn btn-primary" style="width: 100%;">Salvar Nome</button>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 16px 0;">
+
+        <div class="btn-group">
+            <button id="btnIdentify" class="btn btn-secondary" style="width: 100%; border: 1px solid #00e676; color: #00e676;">📍 Localizar ESP32 (Piscar LED)</button>
+        </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -314,6 +336,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             }
         });
 
+        let alexaNameFilled = false;
         async function pollStatus() {
             try {
                 const res = await fetch('/status');
@@ -321,6 +344,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 updateUI(data.state);
                 if (data.uptime) uptimeEl.textContent = data.uptime;
                 if (data.ip) ipEl.textContent = data.ip;
+                
+                // Preenche o input do nome da Alexa apenas uma vez no carregamento da pagina
+                if (data.alexa_name && !alexaNameFilled && document.activeElement.id !== 'alexaNameInput') {
+                    document.getElementById('alexaNameInput').value = data.alexa_name;
+                    alexaNameFilled = true;
+                }
             } catch (err) {}
         }
 
@@ -415,6 +444,30 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             } catch(e) { showToast('Erro ao limpar MAC ⚠️'); }
         });
 
+        document.getElementById('btnSaveAlexa').addEventListener('click', async () => {
+            const name = document.getElementById('alexaNameInput').value.trim();
+            if (name.length === 0) {
+                showToast('Digite um nome válido para a Alexa! ⚠️');
+                return;
+            }
+            try {
+                const res = await fetch('/alexa/save?name=' + encodeURIComponent(name));
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showToast('Nome da Alexa atualizado! Rediscuta no app Alexa. 🏠');
+                } else {
+                    showToast('Erro ao atualizar nome ⚠️');
+                }
+            } catch(e) { showToast('Erro de conexão ⚠️'); }
+        });
+
+        document.getElementById('btnIdentify').addEventListener('click', async () => {
+            showToast('Piscando LED do ESP32 por 5 segundos... 📍');
+            try {
+                await fetch('/identify');
+            } catch(e) {}
+        });
+
         setInterval(pollStatus, 2000);
         setInterval(pollGamepadStatus, 2500); // Polling rápido para capturar sinais
         pollStatus();
@@ -474,7 +527,8 @@ void initWebServer() {
         json += "\"uptime\":\"" + formatUptime() + "\",";
         json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
         json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"heap\":" + String(ESP.getFreeHeap());
+        json += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
+        json += "\"alexa_name\":\"" + alexaDeviceName + "\"";
         json += "}";
         request->send(200, "application/json", json);
     });
@@ -520,6 +574,23 @@ void initWebServer() {
         saveTargetMac(mac);
         String json = "{\"status\":\"ok\",\"target_mac\":\"" + targetGamepadMac + "\"}";
         request->send(200, "application/json", json);
+    });
+
+    // --- Alexa Save Name (GET /alexa/save?name=...) ---
+    server.on("/alexa/save", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String name = "";
+        if (request->hasParam("name")) {
+            name = request->getParam("name")->value();
+        }
+        bool success = saveAlexaName(name);
+        String json = "{\"status\":\"" + String(success ? "ok" : "error") + "\",\"alexa_name\":\"" + alexaDeviceName + "\"}";
+        request->send(200, "application/json", json);
+    });
+
+    // --- Identify / Locate ESP32 (GET /identify) ---
+    server.on("/identify", HTTP_GET, [](AsyncWebServerRequest *request) {
+        triggerIdentify();
+        request->send(200, "text/plain", "Identifying...");
     });
 
     // --- Gamepad Force Connection/Pairing (GET /gamepad/pair?mac=...) ---

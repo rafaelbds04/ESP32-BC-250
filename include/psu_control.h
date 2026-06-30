@@ -104,6 +104,48 @@ void IRAM_ATTR buttonISR() {
 }
 
 // =============================================================================
+// LOCALIZAÇÃO DO DISPOSITIVO (IDENTIFY / BLINK)
+// =============================================================================
+
+volatile bool identifyActive = false;
+unsigned long identifyStartTime = 0;
+unsigned long lastIdentifyBlink = 0;
+bool identifyBlinkState = false;
+
+/**
+ * @brief Ativa o modo de identificação física do ESP32 por LED piscante
+ */
+void triggerIdentify() {
+    identifyActive = true;
+    identifyStartTime = millis();
+    lastIdentifyBlink = 0;
+    identifyBlinkState = false;
+    Serial.println("[PSU] Identificação ativada - piscando LED");
+}
+
+/**
+ * @brief Processa o piscar do LED no modo de identificação (chamado no loop)
+ */
+void handleIdentifyBlink() {
+    if (!identifyActive) return;
+    
+    unsigned long now = millis();
+    if (now - identifyStartTime > 5000) { // Duração: 5 segundos
+        identifyActive = false;
+        // Restaura o estado original do LED com base no estado da PSU
+        digitalWrite(PIN_LED, psuState ? HIGH : LOW);
+        Serial.println("[PSU] Identificação concluída - estado do LED restaurado");
+        return;
+    }
+    
+    if (now - lastIdentifyBlink >= 100) { // Pisca rápido a cada 100ms
+        lastIdentifyBlink = now;
+        identifyBlinkState = !identifyBlinkState;
+        digitalWrite(PIN_LED, identifyBlinkState ? HIGH : LOW);
+    }
+}
+
+// =============================================================================
 // INICIALIZAÇÃO
 // =============================================================================
 

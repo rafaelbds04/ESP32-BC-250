@@ -32,6 +32,9 @@
 #include <WiFi.h>
 #include <WiFiManager.h>  // tzapu/WiFiManager — Portal cativo para config Wi-Fi
 
+#include <Preferences.h>
+Preferences preferences;
+
 // --- Módulos do projeto (ordem importa: config → psu → demais) ---
 #include "config.h"
 #include "psu_control.h"
@@ -145,7 +148,7 @@ void setup() {
     Serial.println("  BOOT COMPLETO — Todos os módulos ativos");
     Serial.println("=============================================");
     Serial.printf("  Web:     http://%s/\n", WiFi.localIP().toString().c_str());
-    Serial.printf("  Alexa:   \"%s\"\n", FAUXMO_DEVICE_NAME);
+    Serial.printf("  Alexa:   \"%s\"\n", alexaDeviceName.c_str());
     Serial.println("  Gamepad: Aguardando conexão BT...");
     Serial.println("  Botão:   GPIO 32 (ISR FALLING)");
     #ifdef USE_LOGIC_INPUT
@@ -178,6 +181,9 @@ void setup() {
 void loop() {
     // 1. BOTÃO FÍSICO — Maior prioridade (processa flag da ISR)
     handleButtonDebounce();
+
+    // Identificação visual (piscar LED para localização)
+    handleIdentifyBlink();
 
     // 2. ALEXA — Processa SSDP discovery e comandos (FauxmoESP)
     handleAlexa();

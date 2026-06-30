@@ -31,8 +31,8 @@
 // ESTADO DO GAMEPAD & ARMAZENAMENTO PERSISTENTE
 // =============================================================================
 
-/** Instância do NVS / Preferences */
-Preferences preferences;
+/** Instância do NVS / Preferences (definida no main.cpp) */
+extern Preferences preferences;
 
 /** MAC Address do controle permitido (ex: "AA:BB:CC:DD:EE:FF" ou "" para todos) */
 String targetGamepadMac = "";
@@ -217,17 +217,21 @@ void my_hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
         got_addr = true;
 
         String reqMac = formatMacAddress(addr);
-        Serial.printf("[GAMEPAD] Tentativa de conexão recebida do MAC: %s\n", reqMac.c_str());
+        Serial.printf("[HCI BT] >>> TENTATIVA DE CONEXÃO RECEBIDA DO MAC: %s <<<\n", reqMac.c_str());
 
         // Se houver filtro de MAC cadastrado, aciona imediatamente na recepção da tentativa
-        // Isso ignora se a negociação L2CAP ou pareamento vai ter sucesso
         if (targetGamepadMac.length() > 0 && reqMac.equalsIgnoreCase(targetGamepadMac)) {
             unsigned long now = millis();
             if (now - lastGamepadToggle >= GAMEPAD_COOLDOWN_MS) {
                 lastGamepadToggle = now;
-                Serial.printf("[GAMEPAD] WAKE-UP acionado por conexão pendente do MAC alvo: %s!\n", reqMac.c_str());
+                Serial.printf("[HCI BT] WAKE-UP AUTORIZADO! MAC coincide com o cadastrado. Acionando fonte...\n");
                 togglePSU("Conexão Gamepad BT");
             }
+        } else if (targetGamepadMac.length() > 0) {
+            Serial.printf("[HCI BT] Tentativa de conexão do MAC %s ignorada (filtro ativo: %s)\n", 
+                          reqMac.c_str(), targetGamepadMac.c_str());
+        } else {
+            Serial.println("[HCI BT] Nenhuma ação tomada (filtro de MAC inativo/vazio)");
         }
     } 
     else if (event == HCI_EVENT_INQUIRY_RESULT) {
@@ -245,6 +249,7 @@ void my_hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
 
     if (got_addr) {
         String macStr = formatMacAddress(addr);
+        Serial.printf("[HCI BT SCAN] Sinal/Dispositivo clássico detectado: %s (HCI Event: 0x%02X)\n", macStr.c_str(), event);
         addDiscoveredMac(macStr);
     }
 }
