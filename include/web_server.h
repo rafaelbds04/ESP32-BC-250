@@ -342,28 +342,25 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
         let alexaNameFilled = false;
         async function pollStatus() {
+            if (document.hidden) return; // Evita polling quando a aba está em background para economizar rádio/bateria
+            
             try {
                 const res = await fetch('/status');
                 const data = await res.json();
+                
+                // 1. Status Geral da Fonte
                 updateUI(data.state);
                 if (data.uptime) uptimeEl.textContent = data.uptime;
                 if (data.ip) ipEl.textContent = data.ip;
                 if (data.version) document.getElementById('fwVersion').textContent = 'v' + data.version;
                 
-                // Preenche o input do nome da Alexa apenas uma vez no carregamento da pagina
+                // 2. Preenche o input do nome da Alexa apenas uma vez no boot
                 if (data.alexa_name && !alexaNameFilled && document.activeElement.id !== 'alexaNameInput') {
                     document.getElementById('alexaNameInput').value = data.alexa_name;
                     alexaNameFilled = true;
                 }
-            } catch (err) {}
-        }
 
-        async function pollGamepadStatus() {
-            try {
-                const res = await fetch('/gamepad/status');
-                const data = await res.json();
-
-                // 1. Atualizar controles totalmente conectados
+                // 3. Atualizar controles totalmente conectados
                 const listEl = document.getElementById('gamepadList');
                 if (data.controllers && data.controllers.length > 0) {
                     let html = '';
@@ -375,7 +372,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     listEl.innerHTML = '<span style="color:#888;">Nenhum controle conectado</span>';
                 }
 
-                // 2. Atualizar lista de MACs descobertos / tentativas capturadas via HCI
+                // 4. Atualizar lista de MACs descobertos / tentativas capturadas via HCI
                 const scannedEl = document.getElementById('scannedList');
                 if (data.discovered && data.discovered.length > 0) {
                     let html = '';
@@ -390,7 +387,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     scannedEl.innerHTML = '<span style="color:#888;">Nenhum sinal detectado. Coloque o controle em pareamento.</span>';
                 }
 
-                // 3. Atualizar status do filtro NVS
+                // 5. Atualizar status do filtro NVS
                 const badge = document.getElementById('macStatusBadge');
                 if (data.target_mac && data.target_mac.length > 0) {
                     badge.innerHTML = `<span style="color:#00e676;">🔒 Filtro Ativo: <strong>${data.target_mac}</strong></span>`;
@@ -403,7 +400,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                         document.getElementById('macInput').value = '';
                     }
                 }
-            } catch(e) {}
+            } catch (err) {}
         }
 
         function useMac(mac) {
@@ -415,6 +412,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         document.getElementById('btnScanMac').addEventListener('click', async () => {
             if (isScanning) return;
             isScanning = true;
+            startAdaptivePolling(); // Acelera polling
             const btn = document.getElementById('btnScanMac');
             btn.style.opacity = '0.5';
             
@@ -432,6 +430,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                             btn.textContent = '🔍 Buscar Controles (10s)';
                             btn.style.opacity = '1';
                             isScanning = false;
+                            startAdaptivePolling(); // Desacelera polling
                             showToast('Busca concluída! Selecione seu controle na lista. 🎮');
                         } else {
                             btn.textContent = `Buscando... (${secondsLeft}s)`;
@@ -441,6 +440,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     showToast('Erro ao iniciar varredura ⚠️');
                     btn.style.opacity = '1';
                     isScanning = false;
+                    startAdaptivePolling();
                 }
             } catch(e) {
                 showToast('Erro de rede ⚠️');
@@ -511,10 +511,18 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             } catch(e) {}
         });
 
-        setInterval(pollStatus, 2000);
-        setInterval(pollGamepadStatus, 2500); // Polling rápido para capturar sinais
+        // Polling adaptativo unificado para evitar sobrecarga no rádio Wi-Fi
+        let pollTimer = null;
+        function startAdaptivePolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(async () => {
+                await pollStatus();
+            }, isScanning ? 2000 : 8000); // Polling lento de 8s se inativo, rápido de 2s se buscando
+        }
+
+        // Primeira chamada
         pollStatus();
-        pollGamepadStatus();
+        startAdaptivePolling();
 
         function showToast(msg) {
             toast.textContent = msg;
@@ -562,7 +570,7 @@ void initWebServer() {
         request->send(200, "application/json", json);
     });
 
-    // --- Status da PSU (GET /status) ---
+    // --- Status Geral e Detalhes de Conectividade (GET /status) ---
     server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         String json = "{";
         json += "\"state\":\"" + String(psuState ? "ON" : "OFF") + "\",";
@@ -571,17 +579,11 @@ void initWebServer() {
         json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
         json += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
         json += "\"alexa_name\":\"" + alexaDeviceName + "\",";
-        json += "\"version\":\"" + String(FW_VERSION) + "\"";
-        json += "}";
-        request->send(200, "application/json", json);
-    });
-
-    // --- Gamepad Status (GET /gamepad/status) ---
-    server.on("/gamepad/status", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String json = "{";
+        json += "\"version\":\"" + String(FW_VERSION) + "\",";
         json += "\"target_mac\":\"" + targetGamepadMac + "\",";
+        
+        // 1. Controles conectados atualmente
         json += "\"controllers\":[";
-
         int count = 0;
         for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
             ControllerPtr ctl = myControllers[i];
@@ -597,7 +599,7 @@ void initWebServer() {
         }
         json += "],";
 
-        // Adiciona a lista de MACs descobertos / interceptados via HCI (Bluetooth clássico)
+        // 2. MACs clássicos descobertos em varreduras GAP/HCI
         json += "\"discovered\":[";
         for (int i = 0; i < discoveredMacsCount; i++) {
             if (i > 0) json += ",";

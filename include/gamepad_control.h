@@ -129,10 +129,43 @@ bool parseMacAddressString(String macStr, bd_addr_t addr) {
 
 #include <gap.h>
 
+// =============================================================================
+// CONTROLE DE COEXISTÊNCIA WI-FI & BLUETOOTH (DISCOVERY TIMEOUT)
+// =============================================================================
+
+unsigned long discoveryStartTime = 0;
+bool discoveryActive = false;
+
+/**
+ * @brief Ativa o modo de descoberta de novos controles por tempo limitado (15s)
+ *        Isso evita que o rádio Bluetooth clássico interfira e derrube a rede Wi-Fi.
+ */
+void startDiscoveryMode() {
+    discoveryActive = true;
+    discoveryStartTime = millis();
+    BP32.enableNewBluetoothConnections(true);
+    Serial.println("[GAMEPAD] Modo de descoberta Bluetooth ativado por 15s...");
+}
+
+/**
+ * @brief Monitora o timeout da descoberta de novos controles
+ */
+void handleGamepadDiscoveryTimeout() {
+    if (!discoveryActive) return;
+    if (millis() - discoveryStartTime > 15000) { // 15 segundos
+        discoveryActive = false;
+        BP32.enableNewBluetoothConnections(false);
+        Serial.println("[GAMEPAD] Modo de descoberta desativado automaticamente para priorizar rádio Wi-Fi");
+    }
+}
+
 /**
  * @brief Força o Bluepad32/BTstack a iniciar uma conexão Bluetooth ativa para o MAC fornecido
  */
 bool forceGamepadConnection(String macStr) {
+    // Ativa novas conexões temporariamente para o handshake
+    startDiscoveryMode();
+
     bd_addr_t addr;
     if (!parseMacAddressString(macStr, addr)) {
         Serial.println("[GAMEPAD] Erro: MAC inválido para conexão forçada");
@@ -154,6 +187,9 @@ bool forceGamepadConnection(String macStr) {
  * @brief Inicia uma varredura GAP de Bluetooth Clássico para buscar dispositivos em pareamento
  */
 bool startBluetoothScan() {
+    // Ativa novas conexões temporariamente para a varredura
+    startDiscoveryMode();
+
     // Limpa a lista anterior de MACs descobertos para obter resultados frescos
     discoveredMacsCount = 0;
     
@@ -328,14 +364,17 @@ void initGamepad() {
 
     // Configurar o Bluepad32
     BP32.setup(&onConnectedController, &onDisconnectedController);
-    BP32.enableNewBluetoothConnections(true);
-    BP32.forgetBluetoothKeys();
+    
+    // Deixe novas conexões (Inquiry scan) desativadas por padrão no boot para preservar o rádio Wi-Fi
+    BP32.enableNewBluetoothConnections(false);
+    
+    // BP32.forgetBluetoothKeys(); // Desativado para persistir o pareamento entre boots!
 
     // Registrar o manipulador de pacotes HCI para capturar conexões pendentes e scans
     hci_event_callback_registration.callback = &my_hci_packet_handler;
     hci_add_event_handler(&hci_event_callback_registration);
 
-    Serial.println("[GAMEPAD] Bluepad32 + Interceptador HCI ativo — aguardando sinais BT...");
+    Serial.println("[GAMEPAD] Bluepad32 + Interceptador HCI inicializado (Pareamento ativo desabilitado no boot)");
 }
 
 // =============================================================================
@@ -346,6 +385,9 @@ void initGamepad() {
  * @brief Processa input dos controles conectados com sucesso
  */
 void handleGamepad() {
+    // Monitora o timeout da descoberta temporária Bluetooth
+    handleGamepadDiscoveryTimeout();
+
     bool dataUpdated = BP32.update();
 
     if (!dataUpdated) {
