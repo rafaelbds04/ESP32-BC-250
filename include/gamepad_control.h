@@ -127,6 +127,8 @@ bool parseMacAddressString(String macStr, bd_addr_t addr) {
     return true;
 }
 
+#include <gap.h>
+
 /**
  * @brief Força o Bluepad32/BTstack a iniciar uma conexão Bluetooth ativa para o MAC fornecido
  */
@@ -146,6 +148,24 @@ bool forceGamepadConnection(String macStr) {
     Serial.printf("[GAMEPAD] Forçando conexão ativa com o controle MAC: %s\n", macStr.c_str());
     uni_hid_device_connect(d);
     return true;
+}
+
+/**
+ * @brief Inicia uma varredura GAP de Bluetooth Clássico para buscar dispositivos em pareamento
+ */
+bool startBluetoothScan() {
+    // Limpa a lista anterior de MACs descobertos para obter resultados frescos
+    discoveredMacsCount = 0;
+    
+    // Inicia varredura GAP de Bluetooth Clássico por 8 unidades * 1.28s = 10.24 segundos
+    int err = gap_inquiry_start(8); 
+    if (err == 0) {
+        Serial.println("[GAMEPAD] Varredura Bluetooth Clássico (Inquiry Scan) iniciada (10s)...");
+        return true;
+    } else {
+        Serial.printf("[GAMEPAD] Erro ao iniciar varredura Bluetooth (código: %d)\n", err);
+        return false;
+    }
 }
 
 /**

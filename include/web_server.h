@@ -246,6 +246,10 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         <h2>Controle Bluetooth</h2>
         <p class="subtitle" style="margin-bottom:16px;">Filtro de Wake-Up por MAC</p>
 
+        <div class="btn-group" style="margin-bottom: 14px;">
+            <button id="btnScanMac" class="btn" style="background: linear-gradient(135deg, #1e88e5, #1565c0); width:100%;">🔍 Buscar Controles (10s)</button>
+        </div>
+
         <div class="gamepad-box">
             <div style="color: #888; margin-bottom: 6px; font-size: 0.9em;">Controle Conectado:</div>
             <div id="gamepadList" style="color: #00e676; font-weight: 500;">Nenhum conectado</div>
@@ -405,6 +409,44 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             document.getElementById('macInput').value = mac;
             showToast('MAC selecionado! Clique em Salvar.');
         }
+
+        let isScanning = false;
+        document.getElementById('btnScanMac').addEventListener('click', async () => {
+            if (isScanning) return;
+            isScanning = true;
+            const btn = document.getElementById('btnScanMac');
+            btn.style.opacity = '0.5';
+            
+            showToast('Iniciando varredura de controles Bluetooth... 📡');
+            
+            try {
+                const res = await fetch('/gamepad/scan');
+                const data = await res.json();
+                if (data.status === 'scanning') {
+                    let secondsLeft = 10;
+                    const interval = setInterval(() => {
+                        secondsLeft--;
+                        if (secondsLeft <= 0) {
+                            clearInterval(interval);
+                            btn.textContent = '🔍 Buscar Controles (10s)';
+                            btn.style.opacity = '1';
+                            isScanning = false;
+                            showToast('Busca concluída! Selecione seu controle na lista. 🎮');
+                        } else {
+                            btn.textContent = `Buscando... (${secondsLeft}s)`;
+                        }
+                    }, 1000);
+                } else {
+                    showToast('Erro ao iniciar varredura ⚠️');
+                    btn.style.opacity = '1';
+                    isScanning = false;
+                }
+            } catch(e) {
+                showToast('Erro de rede ⚠️');
+                btn.style.opacity = '1';
+                isScanning = false;
+            }
+        });
 
         document.getElementById('btnSaveMac').addEventListener('click', async () => {
             const mac = document.getElementById('macInput').value.trim();
@@ -601,6 +643,13 @@ void initWebServer() {
         }
         bool success = forceGamepadConnection(mac);
         String json = "{\"status\":\"" + String(success ? "ok" : "error") + "\"}";
+        request->send(200, "application/json", json);
+    });
+
+    // --- Gamepad Start BLE/BT Scan (GET /gamepad/scan) ---
+    server.on("/gamepad/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+        bool success = startBluetoothScan();
+        String json = "{\"status\":\"" + String(success ? "scanning" : "error") + "\"}";
         request->send(200, "application/json", json);
     });
 
