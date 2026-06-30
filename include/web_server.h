@@ -227,7 +227,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         <div class="info">
             <div class="info-row">
                 <span>Firmware</span>
-                <span>v%FW_VERSION%</span>
+                <span id="fwVersion">v1.0.0</span>
             </div>
             <div class="info-row">
                 <span>Uptime</span>
@@ -348,6 +348,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 updateUI(data.state);
                 if (data.uptime) uptimeEl.textContent = data.uptime;
                 if (data.ip) ipEl.textContent = data.ip;
+                if (data.version) document.getElementById('fwVersion').textContent = 'v' + data.version;
                 
                 // Preenche o input do nome da Alexa apenas uma vez no carregamento da pagina
                 if (data.alexa_name && !alexaNameFilled && document.activeElement.id !== 'alexaNameInput') {
@@ -549,10 +550,9 @@ String formatUptime() {
 
 void initWebServer() {
     // --- Página principal (GET /) ---
+    // Envia o HTML diretamente do flash (PROGMEM) sem gastar RAM alocando no heap!
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String html = String(HTML_PAGE);
-        html.replace("%FW_VERSION%", FW_VERSION);
-        request->send(200, "text/html", html);
+        request->send(200, "text/html", HTML_PAGE);
     });
 
     // --- Toggle da PSU (GET /toggle) ---
@@ -570,7 +570,8 @@ void initWebServer() {
         json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
         json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
         json += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
-        json += "\"alexa_name\":\"" + alexaDeviceName + "\"";
+        json += "\"alexa_name\":\"" + alexaDeviceName + "\",";
+        json += "\"version\":\"" + String(FW_VERSION) + "\"";
         json += "}";
         request->send(200, "application/json", json);
     });
