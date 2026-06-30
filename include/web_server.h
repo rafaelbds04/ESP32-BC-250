@@ -263,7 +263,10 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
         <div class="btn-group">
             <button id="btnSaveMac" class="btn btn-primary">Salvar MAC</button>
-            <button id="btnClearMac" class="btn btn-secondary">Permitir Todos</button>
+            <button id="btnPairMac" class="btn btn-secondary" style="border: 1px solid #ffb74d; color: #ffb74d;">Forçar Pareamento</button>
+        </div>
+        <div class="btn-group" style="margin-top:-6px;">
+            <button id="btnClearMac" class="btn btn-secondary" style="width:100%;">Permitir Todos (Sem Filtro)</button>
         </div>
 
         <div id="macStatusBadge" style="font-size: 0.78em; margin-top: 8px; min-height: 20px;">Filtro: Carregando...</div>
@@ -384,6 +387,24 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             } catch(e) { showToast('Erro ao salvar MAC ⚠️'); }
         });
 
+        document.getElementById('btnPairMac').addEventListener('click', async () => {
+            const mac = document.getElementById('macInput').value.trim();
+            if (mac.length !== 17) {
+                showToast('Digite um MAC válido primeiro! ⚠️');
+                return;
+            }
+            showToast('Enviando sinal de conexão ao controle... 📡');
+            try {
+                const res = await fetch('/gamepad/pair?mac=' + encodeURIComponent(mac));
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showToast('Sinal de pareamento enviado! 🎮');
+                } else {
+                    showToast('Erro ao enviar sinal de pareamento ⚠️');
+                }
+            } catch(e) { showToast('Erro de rede ⚠️'); }
+        });
+
         document.getElementById('btnClearMac').addEventListener('click', async () => {
             try {
                 const res = await fetch('/gamepad/save?mac=clear');
@@ -498,6 +519,17 @@ void initWebServer() {
         }
         saveTargetMac(mac);
         String json = "{\"status\":\"ok\",\"target_mac\":\"" + targetGamepadMac + "\"}";
+        request->send(200, "application/json", json);
+    });
+
+    // --- Gamepad Force Connection/Pairing (GET /gamepad/pair?mac=...) ---
+    server.on("/gamepad/pair", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String mac = "";
+        if (request->hasParam("mac")) {
+            mac = request->getParam("mac")->value();
+        }
+        bool success = forceGamepadConnection(mac);
+        String json = "{\"status\":\"" + String(success ? "ok" : "error") + "\"}";
         request->send(200, "application/json", json);
     });
 

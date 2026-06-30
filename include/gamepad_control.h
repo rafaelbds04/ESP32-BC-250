@@ -95,6 +95,8 @@ void addDiscoveredMac(String mac) {
 // FUNÇÕES AUXILIARES DE MAC & CONFIGURAÇÃO
 // =============================================================================
 
+#include <uni_hid_device.h>
+
 /**
  * @brief Formata o bd_addr_t do BTstack em String (AA:BB:CC:DD:EE:FF)
  */
@@ -103,6 +105,47 @@ String formatMacAddress(const uint8_t* addr) {
     snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
              addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
     return String(buf);
+}
+
+/**
+ * @brief Converte uma string formatada de MAC (AA:BB:CC:DD:EE:FF) para bd_addr_t do BTstack
+ */
+bool parseMacAddressString(String macStr, bd_addr_t addr) {
+    macStr.toUpperCase();
+    macStr.trim();
+    if (macStr.length() != 17) return false;
+    
+    unsigned int bytes[6];
+    int parsed = sscanf(macStr.c_str(), "%X:%X:%X:%X:%X:%X",
+                        &bytes[0], &bytes[1], &bytes[2],
+                        &bytes[3], &bytes[4], &bytes[5]);
+    if (parsed != 6) return false;
+    
+    for (int i = 0; i < 6; i++) {
+        addr[i] = (uint8_t)bytes[i];
+    }
+    return true;
+}
+
+/**
+ * @brief Força o Bluepad32/BTstack a iniciar uma conexão Bluetooth ativa para o MAC fornecido
+ */
+bool forceGamepadConnection(String macStr) {
+    bd_addr_t addr;
+    if (!parseMacAddressString(macStr, addr)) {
+        Serial.println("[GAMEPAD] Erro: MAC inválido para conexão forçada");
+        return false;
+    }
+    
+    uni_hid_device_t* d = uni_hid_device_create(addr);
+    if (d == nullptr) {
+        Serial.println("[GAMEPAD] Erro: falha ao criar instância uni_hid_device_t");
+        return false;
+    }
+    
+    Serial.printf("[GAMEPAD] Forçando conexão ativa com o controle MAC: %s\n", macStr.c_str());
+    uni_hid_device_connect(d);
+    return true;
 }
 
 /**
