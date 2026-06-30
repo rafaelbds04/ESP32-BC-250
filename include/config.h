@@ -110,4 +110,33 @@
 // =============================================================================
 #define WEB_SERVER_PORT 80
 
+#include <Arduino.h>
+
+/**
+ * @brief Higieniza o nome para ser usado como hostname/MDNS de rede
+ *        (Converte para minúsculas, remove espaços e acentos por hífens)
+ */
+inline String sanitizeHostname(String name) {
+    name.toLowerCase();
+    name.trim();
+    String sanitized = "";
+    for (size_t i = 0; i < name.length(); i++) {
+        char c = name.charAt(i);
+        if (isalnum(c)) {
+            sanitized += c;
+        } else if (c == ' ' || c == '-' || c == '_') {
+            if (sanitized.length() > 0 && sanitized.charAt(sanitized.length() - 1) != '-') {
+                sanitized += '-';
+            }
+        }
+    }
+    if (sanitized.length() > 0 && sanitized.charAt(sanitized.length() - 1) == '-') {
+        sanitized.remove(sanitized.length() - 1);
+    }
+    if (sanitized.length() == 0) {
+        sanitized = "esp32-bc250";
+    }
+    return sanitized;
+}
+
 #endif // CONFIG_H

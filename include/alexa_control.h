@@ -40,8 +40,24 @@ void loadAlexaConfig() {
     }
 }
 
+#include <ESPmDNS.h>
+
 /**
- * @brief Salva um novo nome de dispositivo para a Alexa na NVS e atualiza o Fauxmo
+ * @brief Atualiza ou inicia o respondente MDNS com o hostname higienizado do dispositivo
+ */
+void updateMDNSHostname() {
+    String host = sanitizeHostname(alexaDeviceName);
+    MDNS.end();
+    if (MDNS.begin(host.c_str())) {
+        Serial.printf("[WIFI] MDNS responder ativo: http://%s.local/\n", host.c_str());
+        MDNS.addService("http", "tcp", 80);
+    } else {
+        Serial.println("[WIFI] AVISO: Falha ao iniciar MDNS responder");
+    }
+}
+
+/**
+ * @brief Salva um novo nome de dispositivo para a Alexa na NVS e atualiza o Fauxmo e MDNS
  */
 bool saveAlexaName(String name) {
     name.trim();
@@ -56,6 +72,10 @@ bool saveAlexaName(String name) {
 
     // FauxmoESP permite renomear o dispositivo de índice 0 em tempo de execução
     fauxmo.renameDevice((unsigned char)0, alexaDeviceName.c_str());
+
+    // Atualiza o hostname e o MDNS em tempo de execução
+    WiFi.setHostname(sanitizeHostname(alexaDeviceName).c_str());
+    updateMDNSHostname();
 
     Serial.printf("[ALEXA] Nome alterado na NVS de '%s' para '%s'\n", oldName.c_str(), alexaDeviceName.c_str());
     return true;

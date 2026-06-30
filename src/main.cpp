@@ -73,6 +73,10 @@ void setup() {
     initPSUPins();
     Serial.printf("[BOOT] Free heap após GPIOs: %d bytes\n", ESP.getFreeHeap());
 
+    // Carrega o nome da Alexa do NVS antecipadamente para ser usado como hostname da placa
+    loadAlexaConfig();
+    WiFi.setHostname(sanitizeHostname(alexaDeviceName).c_str());
+
     // Desativa escaneamento Bluetooth temporariamente durante a inicialização do Wi-Fi.
     // O BTstack (Bluepad32) inicia automaticamente antes do setup(); desativar a descoberta
     // evita que o rádio 2.4GHz interfira no handshake do Access Point (AP mode).
@@ -118,6 +122,9 @@ void setup() {
     Serial.printf("[WIFI] IP: %s\n", WiFi.localIP().toString().c_str());
     Serial.printf("[WIFI] RSSI: %d dBm\n", WiFi.RSSI());
     Serial.printf("[BOOT] Free heap após WiFi: %d bytes\n", ESP.getFreeHeap());
+
+    // Inicializa o MDNS com o hostname higienizado da Alexa
+    updateMDNSHostname();
 
     // Pequena pausa para garantir a liberação completa do socket TCP da porta 80
     delay(500);
