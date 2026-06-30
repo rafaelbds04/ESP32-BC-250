@@ -9,7 +9,7 @@
  *   GET /               → Página HTML principal
  *   GET /toggle         → Alterna estado da PSU, retorna JSON {"state":"ON"/"OFF"}
  *   GET /status         → Retorna JSON com estado atual {"state":"ON"/"OFF"}
- *   GET /gamepad/status → Retorna JSON com MAC alvo e controles conectados
+ *   GET /gamepad/status → Retorna JSON com MAC alvo, controles conectados e MACs escaneados recentemente
  *   GET /gamepad/save   → Salva novo MAC alvo na memória NVS / Preferences
  */
 
@@ -178,7 +178,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             background: rgba(0,0,0,0.25);
             border-radius: 12px;
             padding: 12px;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             text-align: left;
             font-size: 0.85em;
             border: 1px solid rgba(255,255,255,0.05);
@@ -251,6 +251,11 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             <div id="gamepadList" style="color: #00e676; font-weight: 500;">Nenhum conectado</div>
         </div>
 
+        <div class="gamepad-box">
+            <div style="color: #888; margin-bottom: 6px; font-size: 0.9em;">Sinais Bluetooth Próximos / Tentativas:</div>
+            <div id="scannedList" style="color: #ffb74d; line-height: 1.4em;">Nenhum sinal detectado. Coloque o controle em pareamento.</div>
+        </div>
+
         <div class="input-group">
             <label class="input-label">MAC Alvo do Controle (Wake Function):</label>
             <input type="text" id="macInput" class="text-input" placeholder="Ex: AA:BB:CC:DD:EE:FF" maxlength="17">
@@ -321,6 +326,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                 const res = await fetch('/gamepad/status');
                 const data = await res.json();
 
+                // 1. Atualizar controles totalmente conectados
                 const listEl = document.getElementById('gamepadList');
                 if (data.controllers && data.controllers.length > 0) {
                     let html = '';
@@ -332,6 +338,22 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
                     listEl.innerHTML = '<span style="color:#888;">Nenhum controle conectado</span>';
                 }
 
+                // 2. Atualizar lista de MACs descobertos / tentativas capturadas via HCI
+                const scannedEl = document.getElementById('scannedList');
+                if (data.discovered && data.discovered.length > 0) {
+                    let html = '';
+                    data.discovered.forEach(mac => {
+                        html += `<div style="margin-bottom: 4px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-family:monospace;">${mac}</span>
+                            <a href="#" onclick="useMac('${mac}'); return false;" style="color:#ffb74d; font-weight:bold; font-size:0.85em; text-decoration:none;">[Usar MAC]</a>
+                        </div>`;
+                    });
+                    scannedEl.innerHTML = html;
+                } else {
+                    scannedEl.innerHTML = '<span style="color:#888;">Nenhum sinal detectado. Coloque o controle em pareamento.</span>';
+                }
+
+                // 3. Atualizar status do filtro NVS
                 const badge = document.getElementById('macStatusBadge');
                 if (data.target_mac && data.target_mac.length > 0) {
                     badge.innerHTML = `<span style="color:#00e676;">🔒 Filtro Ativo: <strong>${data.target_mac}</strong></span>`;
@@ -349,7 +371,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
         function useMac(mac) {
             document.getElementById('macInput').value = mac;
-            showToast('MAC preenchido! Clique em Salvar.');
+            showToast('MAC selecionado! Clique em Salvar.');
         }
 
         document.getElementById('btnSaveMac').addEventListener('click', async () => {
@@ -373,7 +395,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
         });
 
         setInterval(pollStatus, 2000);
-        setInterval(pollGamepadStatus, 3000);
+        setInterval(pollGamepadStatus, 2500); // Polling rápido para capturar sinais
         pollStatus();
         pollGamepadStatus();
 
@@ -455,7 +477,16 @@ void initWebServer() {
                 count++;
             }
         }
+        json += "],";
+
+        // Adiciona a lista de MACs descobertos / interceptados via HCI (Bluetooth clássico)
+        json += "\"discovered\":[";
+        for (int i = 0; i < discoveredMacsCount; i++) {
+            if (i > 0) json += ",";
+            json += "\"" + discoveredMacs[i] + "\"";
+        }
         json += "]}";
+
         request->send(200, "application/json", json);
     });
 
